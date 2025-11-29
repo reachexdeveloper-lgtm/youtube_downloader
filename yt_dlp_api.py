@@ -1,14 +1,13 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import subprocess
-import os
+import io
 
 app = FastAPI()
 
 class VideoRequest(BaseModel):
     videoId: str
-
-TMP_DIR = "/tmp"
 
 @app.post("/download")
 async def download_video(request: VideoRequest):
@@ -17,22 +16,26 @@ async def download_video(request: VideoRequest):
     if not video_id or len(video_id) < 5:
         raise HTTPException(status_code=400, detail="Invalid videoId")
 
-    output_file = os.path.join(TMP_DIR, f"{video_id}.mp3")
+    cmd = [
+        "yt-dlp",
+        "-f", "bestaudio",
+        "--extract-audio",
+        "--audio-format", "mp3",
+        "-o", "-",  # stdout
+        f"https://www.youtube.com/watch?v={video_id}"
+    ]
 
     try:
-        subprocess.run([
-            "yt-dlp",
-            "-f", "bestaudio",
-            "--extract-audio",
-            "--audio-format", "mp3",
-            "-o", output_file,
-            f"https://www.youtube.com/watch?v={video_id}"
-        ], check=True)
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
 
-        if not os.path.exists(output_file):
-            raise Exception("File not created")
+        return StreamingResponse(
+            process.stdout,
+            media_type="audio/mpeg"
+        )
 
-        return {"audioPath": output_file}
-
-    except subprocess.CalledProcessError as e:
+    except Exception as e:
         raise HTTPException(status_code=500, detail=f"yt-dlp error: {str(e)}")
