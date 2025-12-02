@@ -1,14 +1,11 @@
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
-import subprocess
-import io
+import uuid
 import tempfile
-import os
+import subprocess
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
+from pydantic import BaseModel
 
 app = FastAPI()
-
-COOKIES_PATH = "./cookies.txt"
 
 class VideoRequest(BaseModel):
     videoId: str
@@ -20,31 +17,32 @@ async def download_video(request: VideoRequest):
     if not video_id or len(video_id) < 5:
         raise HTTPException(status_code=400, detail="Invalid videoId")
 
-    tmp_path = tempfile.gettempdir() + f"/{uuid.uuid4()}.mp3"    
+    video_url = f"https://www.youtube.com/watch?v={video_id}"
 
-    cmd = [
-        "yt-dlp",
-        "-f", "bestaudio",
-        "--extract-audio",
-        "--audio-format", "mp3",
-        "--cookies", COOKIES_PATH,
-        "-o", tmp_path,
-        f"https://www.youtube.com/watch?v={video_id}"
-    ]
+    # ✅ Create temp file path BEFORE using it
+    tmp_path = tempfile.gettempdir() + f"/{uuid.uuid4()}.mp3"
 
-    try:
-        process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
-        )
+    # Run yt-dlp to extract audio
+    result = subprocess.run(
+        [
+            "yt-dlp",
+            "-x",
+            "--audio-format",
+            "mp3",
+            "-o",
+            tmp_path,
+            video_url,
+        ],
+        capture_output=True,
+        text=True,
+    )
 
-        return StreamingResponse(
-            process.stdout,
-            media_type="audio/mpeg"
-        )
+    if result.returncode != 0:
+        raise HTTPException(status_code=500, detail=f"yt-dlp error: {result.stderr}")
 
-    except Exception as e:
-        if os.path.exists(tmp_path):
-            os.remove(tmp_path)
-        raise HTTPException(500, detail=f"yt-dlp error: {str(e)}")                
+    # Return the audio file as a download stream
+    return FileResponse(
+        tmp_path,
+        media_type="audio/mpeg",
+        filename=f"{video_id}.mp3",
+    )
