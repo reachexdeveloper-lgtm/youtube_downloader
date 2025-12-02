@@ -3,6 +3,8 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import subprocess
 import io
+import tempfile
+import os
 
 app = FastAPI()
 
