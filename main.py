@@ -20,6 +20,8 @@ async def download_video(request: VideoRequest):
     if not video_id or len(video_id) < 5:
         raise HTTPException(status_code=400, detail="Invalid videoId")
 
+    tmp_path = tempfile.gettempdir() + f"/{uuid.uuid4()}.mp3"    
+
     cmd = [
         "yt-dlp",
         "-f", "bestaudio",
