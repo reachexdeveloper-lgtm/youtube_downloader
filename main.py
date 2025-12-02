@@ -1,12 +1,13 @@
-import uuid
-import tempfile
-import subprocess
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+import subprocess
+import tempfile
+import os
 
 app = FastAPI()
 
+COOKIES_PATH = "/app/cookies.txt"  
 class VideoRequest(BaseModel):
     videoId: str
 
@@ -17,32 +18,42 @@ async def download_video(request: VideoRequest):
     if not video_id or len(video_id) < 5:
         raise HTTPException(status_code=400, detail="Invalid videoId")
 
-    video_url = f"https://www.youtube.com/watch?v={video_id}"
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
+    tmp_path = tmp.name
+    tmp.close()
 
-    # ✅ Create temp file path BEFORE using it
-    tmp_path = tempfile.gettempdir() + f"/{uuid.uuid4()}.mp3"
+    cmd = [
+        "yt-dlp",
+        f"https://www.youtube.com/watch?v={video_id}",
+        "--extract-audio",
+        "--audio-format", "mp3",
+        "-f", "bestaudio",
+        "--cookies", COOKIES_PATH,
+        "-o", tmp_path,  # save to temp file
+        "--no-progress",  # optional: cleaner logs
+        "--quiet"         # optional: suppress verbose output
+    ]
 
-    # Run yt-dlp to extract audio
-    result = subprocess.run(
-        [
-            "yt-dlp",
-            "-x",
-            "--audio-format",
-            "mp3",
-            "-o",
-            tmp_path,
-            video_url,
-        ],
-        capture_output=True,
-        text=True,
-    )
+    try:
+        result = subprocess.run(cmd, capture_output=True)
 
-    if result.returncode != 0:
-        raise HTTPException(status_code=500, detail=f"yt-dlp error: {result.stderr}")
+        if result.returncode != 0:
+            err_msg = result.stderr.decode()
+            # Handle common errors
+            if "Sign in to confirm" in err_msg:
+                raise HTTPException(403, detail="YouTube requires login. Check cookies.")
+            raise HTTPException(500, detail=f"yt-dlp failed: {err_msg}")
 
-    # Return the audio file as a download stream
-    return FileResponse(
-        tmp_path,
-        media_type="audio/mpeg",
-        filename=f"{video_id}.mp3",
-    )
+        # Stream the temporary file
+        def iterfile():
+            with open(tmp_path, "rb") as f:
+                while chunk := f.read(1024 * 1024):
+                    yield chunk
+            os.remove(tmp_path)
+
+        return StreamingResponse(iterfile(), media_type="audio/mpeg")
+
+    except Exception as e:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        raise HTTPException(status_code=500, detail=f"yt-dlp error: {str(e)}")
