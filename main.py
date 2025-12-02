@@ -7,7 +7,7 @@ import os
 
 app = FastAPI()
 
-COOKIES_PATH = "/app/cookies.txt"  
+COOKIES_PATH = "./cookies.txt"  
 class VideoRequest(BaseModel):
     videoId: str
 
