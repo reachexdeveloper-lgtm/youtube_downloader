@@ -16,6 +16,10 @@ async def download_video(request: VideoRequest):
     if not video_id or len(video_id) < 5:
         raise HTTPException(status_code=400, detail="Invalid videoId")
 
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
+    tmp_path = tmp.name
+    tmp.close()
+
     cmd = [
         "yt-dlp",
         "-f", "bestaudio",
@@ -26,16 +30,18 @@ async def download_video(request: VideoRequest):
     ]
 
     try:
-        process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
-        )
+        result = subprocess.run(cmd, capture_output=True)
+        
+        if result.returncode != 0:
+            raise HTTPException(500, result.stderr.decode())
 
-        return StreamingResponse(
-            process.stdout,
-            media_type="audio/mpeg"
-        )
+        def iterfile():
+            with open(tmp_path, "rb") as f:
+                while chunk := f.read(1024 * 1024):
+                    yield chunk
+            os.remove(tmp_path)
+
+        return StreamingResponse(iterfile(), media_type="audio/mpeg")
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"yt-dlp error: {str(e)}")
